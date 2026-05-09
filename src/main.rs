@@ -1,0 +1,176 @@
+// ============================================================================
+// HelioxOS — Main Entry Point
+// ============================================================================
+// This is the kernel entry point. The bootloader hands control here after
+// setting up basic hardware state (GDT, page tables, stack).
+//
+// Architecture: x86_64 bare-metal
+// No standard library — we are the operating system.
+// ============================================================================
+
+#![no_std]                          // No standard library
+#![no_main]                         // No Rust runtime entry point
+#![feature(custom_test_frameworks)] // Custom test runner
+#![test_runner(helioxos::test_runner)]
+#![reexport_test_harness_main = "test_main"]
+
+extern crate alloc;
+
+use bootloader::{BootInfo, entry_point};
+use core::panic::PanicInfo;
+use helioxos::println;
+
+// Register our kernel entry point with the bootloader
+entry_point!(kernel_main);
+
+/// HelioxOS Kernel Entry Point
+/// 
+/// Called by the bootloader after basic hardware initialization.
+/// This function initializes all kernel subsystems in the correct order
+/// and then enters the main shell loop.
+fn kernel_main(boot_info: &'static BootInfo) -> ! {
+    // ========================================================================
+    // Phase 1: Core Hardware Initialization
+    // ========================================================================
+    
+    // Print boot banner
+    print_boot_banner();
+    
+    // Initialize GDT, IDT, and interrupt controllers
+    helioxos::init();
+    println!("[  OK  ] Interrupts and GDT initialized");
+
+    // ========================================================================
+    // Phase 2: Memory Subsystem
+    // ========================================================================
+    
+    use helioxos::memory;
+    use x86_64::VirtAddr;
+
+    // Initialize page table mapper
+    let phys_mem_offset = VirtAddr::new(boot_info.physical_memory_offset);
+    let mut mapper = unsafe { memory::init(phys_mem_offset) };
+    
+    // Initialize frame allocator from bootloader memory map
+    let mut frame_allocator = unsafe {
+        memory::BootInfoFrameAllocator::init(&boot_info.memory_map)
+    };
+    println!("[  OK  ] Page table mapper initialized");
+    
+    // Initialize kernel heap
+    helioxos::memory::heap::init_heap(&mut mapper, &mut frame_allocator)
+        .expect("Heap initialization failed");
+    println!("[  OK  ] Kernel heap initialized ({}KB)", 
+        helioxos::memory::heap::HEAP_SIZE / 1024);
+
+    // ========================================================================
+    // Phase 3: Kernel Subsystems
+    // ========================================================================
+    
+    // Initialize logging subsystem
+    helioxos::logging::init();
+    println!("[  OK  ] Logging subsystem initialized");
+    
+    // Initialize filesystem
+    helioxos::fs::init();
+    println!("[  OK  ] RAM filesystem initialized");
+    
+    // Initialize security subsystem
+    helioxos::security::init();
+    println!("[  OK  ] Capability-based security initialized");
+    
+    // Initialize service manager
+    helioxos::services::init();
+    println!("[  OK  ] Service manager initialized");
+
+    // Initialize the agent runtime boundary. This registers a sandboxed
+    // runtime service without loading any probabilistic agent code in kernel.
+    helioxos::agent::init();
+    println!("[  OK  ] Agent runtime boundary initialized");
+    
+    // Initialize scheduler
+    helioxos::scheduler::init();
+    println!("[  OK  ] Task scheduler initialized");
+    
+    // ========================================================================
+    // Phase 4: Post-Boot
+    // ========================================================================
+    
+    // Log boot completion
+    helioxos::logging::audit::log_event(
+        helioxos::logging::audit::AuditEvent::SystemBoot,
+        "HelioxOS kernel boot sequence completed successfully",
+    );
+    
+    println!();
+    println!("\x1b[36m╔══════════════════════════════════════════════════════════╗\x1b[0m");
+    println!("\x1b[36m║\x1b[0m  HelioxOS v0.1.0 — AI-Native Autonomous OS Foundation   \x1b[36m║\x1b[0m");
+    println!("\x1b[36m║\x1b[0m  Type 'help' for available commands                     \x1b[36m║\x1b[0m");
+    println!("\x1b[36m╚══════════════════════════════════════════════════════════╝\x1b[0m");
+    println!();
+
+    // VGA text mode does not interpret ANSI escapes and only supports a
+    // small character set. Clear the decorative boot art and leave the user
+    // at a deterministic ASCII shell-ready screen.
+    helioxos::vga::WRITER.lock().clear_screen();
+    print_ready_banner();
+
+    // Run tests if in test mode
+    #[cfg(test)]
+    test_main();
+
+    // Enter the shell — this never returns
+    helioxos::shell::run();
+}
+
+/// Print the HelioxOS boot banner with ASCII art
+fn print_boot_banner() {
+    println!();
+    println!("\x1b[33m ██╗  ██╗███████╗██╗     ██╗ ██████╗ ██╗  ██╗ ██████╗ ███████╗\x1b[0m");
+    println!("\x1b[33m ██║  ██║██╔════╝██║     ██║██╔═══██╗╚██╗██╔╝██╔═══██╗██╔════╝\x1b[0m");
+    println!("\x1b[33m ███████║█████╗  ██║     ██║██║   ██║ ╚███╔╝ ██║   ██║███████╗\x1b[0m");
+    println!("\x1b[33m ██╔══██║██╔══╝  ██║     ██║██║   ██║ ██╔██╗ ██║   ██║╚════██║\x1b[0m");
+    println!("\x1b[33m ██║  ██║███████╗███████╗██║╚██████╔╝██╔╝ ██╗╚██████╔╝███████║\x1b[0m");
+    println!("\x1b[33m ╚═╝  ╚═╝╚══════╝╚══════╝╚═╝ ╚═════╝╚═╝  ╚═╝ ╚═════╝ ╚══════╝\x1b[0m");
+    println!();
+    println!("  Booting HelioxOS v0.1.0 — AI-Native Autonomous OS");
+    println!("  Architecture: x86_64 | Mode: Protected");
+    println!();
+}
+
+/// Print the shell-ready status screen using only VGA-safe ASCII.
+fn print_ready_banner() {
+    println!("HelioxOS v0.1.0");
+    println!("AI-Native Autonomous OS Foundation");
+    println!();
+    println!("[ OK ] Interrupts and GDT initialized");
+    println!("[ OK ] Page table mapper initialized");
+    println!("[ OK ] Kernel heap initialized");
+    println!("[ OK ] Logging subsystem initialized");
+    println!("[ OK ] RAM filesystem initialized");
+    println!("[ OK ] Capability security initialized");
+    println!("[ OK ] Service manager initialized");
+    println!("[ OK ] Task scheduler initialized");
+    println!();
+    println!("Kernel boundary: deterministic; AI runs in runtime services.");
+    println!("Type 'help' for available commands.");
+    println!();
+}
+
+/// Panic handler — called on unrecoverable errors
+/// 
+/// In a bare-metal environment, there's nowhere to unwind to.
+/// We print the panic info and halt the CPU.
+#[cfg(not(test))]
+#[panic_handler]
+fn panic(info: &PanicInfo) -> ! {
+    println!("\x1b[31m[KERNEL PANIC]\x1b[0m {}", info);
+    helioxos::hlt_loop();
+}
+
+/// Test-mode panic handler — exits QEMU with failure code
+#[cfg(test)]
+#[panic_handler]
+fn panic(info: &PanicInfo) -> ! {
+    helioxos::test_panic_handler(info)
+}
