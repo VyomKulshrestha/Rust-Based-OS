@@ -1,0 +1,77 @@
+# HelioxOS Build Helper Script
+# Usage: .\build.ps1 [build|run|clean|check]
+
+param(
+    [string]$Action = "build"
+)
+
+# Ensure the nightly rustup toolchain takes priority over standalone Rust
+# installations. This machine also has a stable Rust install in Program Files;
+# putting the nightly toolchain bin first keeps cargo's child rustc invocations
+# on the same toolchain that owns the x86_64-unknown-none target.
+$NightlyBin = "$env:USERPROFILE\.rustup\toolchains\nightly-x86_64-pc-windows-msvc\bin"
+$CargoBin = "$env:USERPROFILE\.cargo\bin"
+$env:Path = "$NightlyBin;$CargoBin;" + [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+
+switch ($Action) {
+    "build" {
+        Write-Host "Building HelioxOS..." -ForegroundColor Cyan
+        cargo build 2>&1 | ForEach-Object { $_.ToString() }
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "`nKernel build failed." -ForegroundColor Red
+            exit $LASTEXITCODE
+        }
+
+        if (Test-Path "target\x86_64-unknown-none\debug\helioxos") {
+            Write-Host "`nBuild successful!" -ForegroundColor Green
+            cargo bootimage 2>&1 | ForEach-Object { $_.ToString() }
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "Boot image creation failed." -ForegroundColor Red
+                exit $LASTEXITCODE
+            }
+            $img = "target\x86_64-unknown-none\debug\bootimage-helioxos.bin"
+            if (Test-Path $img) {
+                $size = (Get-Item $img).Length
+                Write-Host "Boot image: $img ($([math]::Round($size/1KB)) KB)" -ForegroundColor Green
+            }
+        }
+    }
+    "run" {
+        Write-Host "Building and running HelioxOS in QEMU..." -ForegroundColor Cyan
+        cargo bootimage 2>&1 | ForEach-Object { $_.ToString() }
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "Boot image creation failed." -ForegroundColor Red
+            exit $LASTEXITCODE
+        }
+        $img = "target\x86_64-unknown-none\debug\bootimage-helioxos.bin"
+        if (Test-Path $img) {
+            $qemu = (Get-Command qemu-system-x86_64 -ErrorAction SilentlyContinue).Source
+            if (-not $qemu -and (Test-Path "C:\Program Files\GNS3\qemu-3.1.0\qemu-system-x86_64.exe")) {
+                $qemu = "C:\Program Files\GNS3\qemu-3.1.0\qemu-system-x86_64.exe"
+            }
+            if (-not $qemu) {
+                Write-Host "qemu-system-x86_64 not found. Install QEMU or add it to PATH." -ForegroundColor Red
+                exit 1
+            }
+            & $qemu -drive format=raw,file=$img -serial stdio
+        } else {
+            Write-Host "Boot image not found. Build first." -ForegroundColor Red
+            exit 1
+        }
+    }
+    "clean" {
+        Write-Host "Cleaning build artifacts..." -ForegroundColor Yellow
+        cargo clean 2>&1 | ForEach-Object { $_.ToString() }
+        Write-Host "Clean complete." -ForegroundColor Green
+    }
+    "check" {
+        Write-Host "Checking HelioxOS for errors..." -ForegroundColor Cyan
+        cargo check 2>&1 | ForEach-Object { $_.ToString() }
+        if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+        }
+    }
+    default {
+        Write-Host "Usage: .\build.ps1 [build|run|clean|check]" -ForegroundColor Yellow
+    }
+}

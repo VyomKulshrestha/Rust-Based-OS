@@ -1,0 +1,12 @@
+/target/
+/target*/
+*.bin
+*.iso
+*.img
+*.ppm
+*.png
+*.log
+*.pdb
+*.exe
+!.cargo/
+!.cargo/config.toml

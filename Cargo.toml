@@ -1,0 +1,51 @@
+# ============================================================================
+# HelioxOS — A Rust-based AI-Native Autonomous Operating System
+# ============================================================================
+# Version: 0.1.0
+# Architecture: x86_64 bare-metal
+# Philosophy: Security-first, modular, AI-runtime-ready
+# ============================================================================
+
+[package]
+name = "helioxos"
+version = "0.1.0"
+edition = "2021"
+authors = ["HelioxOS Contributors"]
+description = "A minimal modular Rust-based operating system designed as the foundation for an AI-native autonomous computing environment"
+license = "MIT"
+
+# ==== Dependencies ====
+# All dependencies are no_std compatible for bare-metal execution
+
+[dependencies]
+# Boot and hardware abstraction
+bootloader = { version = "=0.9.33", features = ["map_physical_memory"] }
+
+# x86_64 architecture support (GDT, IDT, paging, port I/O)
+x86_64 = "0.15.2"
+
+# Serial port output (UART 16550) for QEMU debugging
+uart_16550 = "0.2.19"
+
+# Programmable Interrupt Controller
+pic8259 = "0.11.0"
+
+# Spinlock-based synchronization (no_std)
+spin = "0.9.8"
+
+# Kernel heap allocator
+linked_list_allocator = "0.10.5"
+
+# Lazy initialization
+lazy_static = { version = "1.5.0", features = ["spin_no_std"] }
+
+# ==== Profile Configuration ====
+
+[profile.dev]
+panic = "abort"         # No unwinding in kernel
+opt-level = 0
+
+[profile.release]
+panic = "abort"
+opt-level = 2
+lto = true              # Link-time optimization for smaller binary

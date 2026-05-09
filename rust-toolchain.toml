@@ -1,0 +1,11 @@
+# HelioxOS Rust Toolchain Configuration
+# Requires nightly for bare-metal OS development features:
+# - custom_test_frameworks
+# - abi_x86_interrupt  
+# - naked_functions
+# - allocator_api
+
+[toolchain]
+channel = "nightly"
+components = ["rust-src", "llvm-tools-preview"]
+targets = ["x86_64-unknown-none"]
